@@ -283,6 +283,102 @@
         color: var(--ivory-dim);
         margin-top: 10px;
       }
+
+      /* ---- remove user ---- */
+      .card-side {
+        display: flex;
+        align-items: center;
+        align-self: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .delBtn {
+        background: none;
+        border: 1px solid rgba(193, 85, 74, 0.45);
+        color: var(--warn);
+        font-family: "Tajawal", sans-serif;
+        font-size: 0.72rem;
+        line-height: 1;
+        padding: 6px 9px;
+        border-radius: 9px;
+        cursor: pointer;
+        opacity: 0.75;
+      }
+      .delBtn:hover {
+        opacity: 1;
+        background: rgba(193, 85, 74, 0.14);
+      }
+      .delBtn:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(3, 16, 15, 0.72);
+        backdrop-filter: blur(3px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        z-index: 50;
+      }
+      .modal.hidden {
+        display: none;
+      }
+      .modal-box {
+        width: 100%;
+        max-width: 330px;
+        background: linear-gradient(160deg, #0e3230, #0a2a2d);
+        border: 1px solid var(--glass-border);
+        border-radius: 18px;
+        padding: 22px 20px 18px;
+        text-align: center;
+      }
+      .modal-title {
+        font-family: "Amiri", serif;
+        font-weight: 700;
+        font-size: 1.12rem;
+        color: var(--gold-light);
+      }
+      .modal-text {
+        margin-top: 10px;
+        font-size: 0.85rem;
+        line-height: 1.85;
+        color: var(--ivory-dim);
+      }
+      .modal-text b {
+        color: var(--ivory);
+      }
+      .modal-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 18px;
+      }
+      .modal-actions button {
+        flex: 1;
+        padding: 11px;
+        border-radius: 11px;
+        font-family: "Tajawal", sans-serif;
+        font-size: 0.86rem;
+        font-weight: 700;
+        cursor: pointer;
+        border: 1px solid var(--glass-border);
+      }
+      .btn-ghost {
+        background: none;
+        color: var(--ivory-dim);
+      }
+      .btn-danger {
+        background: var(--warn);
+        border-color: var(--warn);
+        color: #fff;
+      }
+      .btn-danger:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
     </style>
   </head>
   <body>
@@ -311,6 +407,17 @@
       </div>
     </div>
 
+    <div id="modal" class="modal hidden">
+      <div class="modal-box">
+        <div class="modal-title">إزالة المستخدم</div>
+        <div class="modal-text" id="modalText"></div>
+        <div class="modal-actions">
+          <button class="btn-ghost" id="modalCancel">إلغاء</button>
+          <button class="btn-danger" id="modalConfirm">إزالة</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module">
       import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
       import {
@@ -324,6 +431,9 @@
         collection,
         doc,
         onSnapshot,
+        getDocs,
+        deleteDoc,
+        writeBatch,
       } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
       const firebaseConfig = {
@@ -351,6 +461,10 @@
       const emptyEl = document.getElementById("empty");
       const activeCountEl = document.getElementById("activeCount");
       const totalCountEl = document.getElementById("totalCount");
+      const modal = document.getElementById("modal");
+      const modalText = document.getElementById("modalText");
+      const modalCancel = document.getElementById("modalCancel");
+      const modalConfirm = document.getElementById("modalConfirm");
 
       function todayStr() {
         const d = new Date();
@@ -466,6 +580,75 @@
         }
       }, 60000);
 
+      // ---- removing a user ----
+      const removing = new Set(); // uids currently being deleted
+      let pendingUid = null;
+
+      function askRemove(uid, name) {
+        pendingUid = uid;
+        modalText.innerHTML = "";
+        const line1 = document.createElement("div");
+        line1.innerHTML = "هتشيل <b></b> من الداشبورد نهائيًا.";
+        line1.querySelector("b").textContent = name;
+        const line2 = document.createElement("div");
+        line2.textContent = "هيتسجّل خروجه من التطبيق، ولو حب يرجع لازم يكتب اسمه من جديد ويبدأ من الصفر.";
+        modalText.appendChild(line1);
+        modalText.appendChild(line2);
+        modal.classList.remove("hidden");
+      }
+
+      function closeModal() {
+        pendingUid = null;
+        modal.classList.add("hidden");
+        modalConfirm.disabled = false;
+        modalConfirm.textContent = "إزالة";
+      }
+
+      modalCancel.addEventListener("click", closeModal);
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal && !modalConfirm.disabled) closeModal();
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !modal.classList.contains("hidden") && !modalConfirm.disabled) closeModal();
+      });
+
+      modalConfirm.addEventListener("click", async () => {
+        const uid = pendingUid;
+        if (!uid) return;
+        modalConfirm.disabled = true;
+        modalConfirm.textContent = "جاري الإزالة…";
+        removing.add(uid);
+        render();
+        try {
+          await removeUser(uid);
+          closeModal();
+        } catch (e) {
+          console.error(e);
+          modalConfirm.disabled = false;
+          modalConfirm.textContent = "إزالة";
+          modalText.textContent = "مقدرتش أشيله — جرّب تاني، وتأكد إن صلاحيات الحذف مفعّلة في قواعد Firestore.";
+        } finally {
+          removing.delete(uid);
+          render();
+        }
+      });
+
+      async function removeUser(uid) {
+        // 1) امسح كل أيام المستخدم (الـ subcollection) على دفعات
+        const dailySnap = await getDocs(collection(db, "users", uid, "daily"));
+        const docsList = dailySnap.docs;
+        for (let i = 0; i < docsList.length; i += 400) {
+          const batch = writeBatch(db);
+          docsList.slice(i, i + 400).forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+        }
+        // 2) امسح مستند المستخدم نفسه في الآخر — ده الإشارة اللي بيتخرّج بيها من التطبيق
+        await deleteDoc(doc(db, "users", uid));
+        // 3) نظّف المتابعة المحلية فورًا من غير ما نستنى الـ listener
+        userDocs.delete(uid);
+        unwatchDaily(uid);
+      }
+
       function render() {
         const uids = Array.from(userDocs.keys());
         totalCountEl.textContent = uids.length;
@@ -512,8 +695,22 @@
           const last = document.createElement("div");
           last.className = "card-last";
           last.textContent = isActive ? relativeTime(daily.lastActive) : "محدش نشط النهاردة";
+
+          const side = document.createElement("div");
+          side.className = "card-side";
+          const del = document.createElement("button");
+          del.className = "delBtn";
+          del.type = "button";
+          del.title = "إزالة المستخدم";
+          const busy = removing.has(uid);
+          del.disabled = busy;
+          del.textContent = busy ? "…" : "إزالة";
+          del.addEventListener("click", () => askRemove(uid, user.name || "مستخدم بدون اسم"));
+          side.appendChild(last);
+          side.appendChild(del);
+
           head.appendChild(name);
-          head.appendChild(last);
+          head.appendChild(side);
           card.appendChild(head);
 
           const adhkarRow = document.createElement("div");
