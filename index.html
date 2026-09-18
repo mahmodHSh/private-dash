@@ -705,7 +705,7 @@
           const busy = removing.has(uid);
           del.disabled = busy;
           del.textContent = busy ? "…" : "إزالة";
-          del.addEventListener("click", () => askRemove(uid, user.name || "مستخدم بدون اسم"));
+          del.addEventListener("click", () => askRemove(uid, user.name || " بدون اسم"));
           side.appendChild(last);
           side.appendChild(del);
 
